@@ -762,76 +762,94 @@ function renderKE() {
     return;
   }
 
-  // Sort readings by month
+  // Sort all readings oldest → newest
   const sorted = [...keReadings].sort((a,b) => monthSortKey(a.month) - monthSortKey(b.month));
 
-  // Current cycle: reset on 6th of each month
+  // ─── CURRENT CYCLE LOGIC ───
+  // KE billing cycle resets on the 6th of each month.
+  // "Current cycle" = readings whose MONTH matches the current billing period.
+  // If today >= 6th  → current cycle month = this calendar month
+  // If today < 6th   → current cycle month = last calendar month
   const now = new Date();
-  const cycleStart = new Date(now.getFullYear(), now.getMonth(), 6);
-  if (now < cycleStart) cycleStart.setMonth(cycleStart.getMonth() - 1);
+  const cycleMonthDate = now.getDate() >= 6
+    ? new Date(now.getFullYear(), now.getMonth(), 1)       // this month
+    : new Date(now.getFullYear(), now.getMonth() - 1, 1);  // last month
 
-  // Find readings in current cycle (readings dated after cycleStart)
-  // We use the reading date field. If not parseable, use last reading.
-  let cycleUnits = 0;
-  let cycleRows = [];
+  const cycleMonthNames = ['january','february','march','april','may','june',
+                            'july','august','september','october','november','december'];
+  const cycleMonthName  = cycleMonthNames[cycleMonthDate.getMonth()];
+  const cycleYear       = cycleMonthDate.getFullYear();
 
-  sorted.forEach(row => {
-    const rd = parseReadingDate(row.readingDate);
-    if (rd && rd >= cycleStart) {
-      cycleUnits += row.units;
-      cycleRows.push(row);
+  // Match a KE row to the current cycle by its month string
+  function isCurrentCycle(row) {
+    const m = row.month.toLowerCase();
+    // Must contain the right month name AND (right year OR no year digit conflicts)
+    if (!m.includes(cycleMonthName)) return false;
+    // If the month string has a 4-digit year, it must match
+    const yearMatch = m.match(/(\d{4})/);
+    if (yearMatch && parseInt(yearMatch[1]) !== cycleYear) return false;
+    // If 2-digit year present, check it
+    const y2 = m.match(/(\d{2})(?!\d)/);
+    if (y2) {
+      const fullYear = 2000 + parseInt(y2[1]);
+      if (fullYear !== cycleYear) return false;
     }
-  });
-
-  // If nothing matched, show latest reading's units
-  if (cycleRows.length === 0 && sorted.length > 0) {
-    const last = sorted[sorted.length - 1];
-    cycleUnits = last.units;
-    cycleRows = [last];
+    return true;
   }
 
+  const cycleRows  = sorted.filter(isCurrentCycle);
+  // Current cycle units = sum of (curr - prev) for all readings in this cycle
+  const cycleUnits = cycleRows.reduce((s, r) => s + r.units, 0);
+
+  const cycleStartDisplay = `6 ${cycleMonthDate.toLocaleString('default',{month:'long'})} ${cycleYear}`;
+
+  // Debug output
+  showDebug('Cycle month: ' + cycleMonthName + ' ' + cycleYear);
+  showDebug('Cycle rows found: ' + cycleRows.length + ' — units: ' + cycleUnits);
+
   const remaining = Math.max(0, 200 - cycleUnits);
-  const pct = Math.min(100, Math.round(cycleUnits / 200 * 100));
+  const pct       = Math.min(100, Math.round(cycleUnits / 200 * 100));
 
   document.getElementById('ke-cycle-units').textContent = Math.round(cycleUnits);
-  document.getElementById('ke-remaining').textContent = `${remaining} units remaining before 200 limit`;
+  document.getElementById('ke-remaining').textContent   = `${Math.round(remaining)} units remaining before 200 limit`;
   document.getElementById('ke-progress-pct').textContent = pct + '%';
+  document.getElementById('ke-cycle-info').textContent   = `Current cycle: ${cycleStartDisplay} onwards`;
 
   const bar = document.getElementById('ke-progress-bar');
-  bar.style.width = pct + '%';
-  bar.className = 'progress-bar-fill';
-  if (cycleUnits >= 180) bar.classList.add('danger');
+  bar.style.width  = pct + '%';
+  bar.className    = 'progress-bar-fill';
+  if (cycleUnits >= 180)      bar.classList.add('danger');
   else if (cycleUnits >= 150) bar.classList.add('warning');
 
-  const alertEl = document.getElementById('ke-alert');
+  const alertEl  = document.getElementById('ke-alert');
   const alertMsg = document.getElementById('ke-alert-msg');
   const alertSub = document.getElementById('ke-alert-sub');
   alertEl.className = 'alert-banner';
   if (cycleUnits >= 180) {
     alertEl.classList.add('danger');
-    document.getElementById('ke-alert').querySelector('.alert-icon').textContent = '🔴';
+    alertEl.querySelector('.alert-icon').textContent = '🔴';
     alertMsg.textContent = '⚠️ Khabardar! 200 unit ki had qareeb aa rahi hai';
-    alertSub.textContent = `${cycleUnits} units used — only ${remaining} left. Reduce consumption!`;
+    alertSub.textContent = `${Math.round(cycleUnits)} units used — sirf ${Math.round(remaining)} bacha hai!`;
   } else if (cycleUnits >= 150) {
     alertEl.classList.add('warning');
-    document.getElementById('ke-alert').querySelector('.alert-icon').textContent = '🟡';
+    alertEl.querySelector('.alert-icon').textContent = '🟡';
     alertMsg.textContent = '⚡ Thori savdhani zaroor hai!';
-    alertSub.textContent = `${cycleUnits} units used — approaching warning zone`;
+    alertSub.textContent = `${Math.round(cycleUnits)} units used — warning zone qareeb hai`;
   } else {
     alertEl.classList.add('safe');
-    document.getElementById('ke-alert').querySelector('.alert-icon').textContent = '🟢';
+    alertEl.querySelector('.alert-icon').textContent = '🟢';
     alertMsg.textContent = '✅ Safe Zone mein hain';
-    alertSub.textContent = `${cycleUnits} units used — all good!`;
+    alertSub.textContent = `${Math.round(cycleUnits)} units used — bilkul theek hai!`;
   }
 
-  // Render all readings list (newest first)
+  // Render all readings newest → oldest, highlight current cycle rows
   const reversed = [...sorted].reverse();
-  const html = reversed.map((row, idx) => {
-    const isCurrent = cycleRows.some(cr => cr.month === row.month && cr.readingDate === row.readingDate);
+  const html = reversed.map(row => {
+    const isCurrent = isCurrentCycle(row);
     return `
       <div class="ke-row">
         <div class="ke-row-left">
-          <div class="ke-row-month">${row.month} ${isCurrent ? '🔵' : ''}</div>
+          <div class="ke-row-month">${row.month}${isCurrent ? ' 🔵' : ''}</div>
           <div class="ke-row-date">📅 ${row.readingDate || '—'}</div>
           <div class="ke-row-readings">📊 ${row.prev} → ${row.curr}</div>
         </div>
@@ -839,22 +857,7 @@ function renderKE() {
       </div>`;
   }).join('');
 
-  document.getElementById('ke-readings-list').innerHTML = html;
-  document.getElementById('ke-cycle-info').textContent = `Cycle started: ${cycleStart.toLocaleDateString('en-PK',{day:'numeric',month:'short',year:'numeric'})}`;
-}
-
-function parseReadingDate(str) {
-  if (!str) return null;
-  // Try common formats: "6-Jan-24", "Jan 6, 2024", "06/01/2024" etc
-  const d = new Date(str);
-  if (!isNaN(d)) return d;
-  // Try "6-Jan-24" pattern
-  const m = str.match(/(\d{1,2})[- ](\w+)[- ](\d{2,4})/);
-  if (m) {
-    const year = m[3].length === 2 ? '20' + m[3] : m[3];
-    return new Date(`${m[2]} ${m[1]}, ${year}`);
-  }
-  return null;
+  document.getElementById('ke-readings-list').innerHTML = html || '<div class="empty-state"><div class="empty-icon">📭</div><div class="empty-text">No readings found</div></div>';
 }
 
 // ─── BILL HISTORY ───
