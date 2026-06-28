@@ -797,18 +797,42 @@ function renderKE() {
     return true;
   }
 
-  const cycleRows  = sorted.filter(isCurrentCycle);
-  // Current cycle units = sum of (curr - prev) for all readings in this cycle
-  const cycleUnits = cycleRows.reduce((s, r) => s + r.units, 0);
+  const cycleRows = sorted.filter(isCurrentCycle);
+
+  // Reading Date format in sheet: "06-Jun-26", "28-Jun-26"
+  // The row dated ON the 6th = start of new cycle (meter read that day).
+  // Rows AFTER the 6th = units consumed within this cycle.
+  // 06-Jun-26 row (231 units) = May 6 to Jun 6 period  → OLD cycle
+  // 28-Jun-26 row (166 units) = Jun 6 to Jun 28 period → CURRENT cycle
+  // So: only count rows whose Reading Date is STRICTLY AFTER the 6th.
+
+  const cycleStart6th = new Date(cycleYear, cycleMonthDate.getMonth(), 6);
+
+  function parseRD(str) {
+    if (!str) return null;
+    // "06-Jun-26" or "6-Jun-26"
+    const m = str.match(/(\d{1,2})[/-](\w+)[/-](\d{2,4})/);
+    if (m) {
+      const yr = m[3].length === 2 ? 2000 + parseInt(m[3]) : parseInt(m[3]);
+      return new Date(m[2] + ' ' + m[1] + ', ' + yr);
+    }
+    return null;
+  }
+
+  // Only rows where reading date > 6th (the 6th reading itself is end of previous cycle)
+  const activeRows = cycleRows.filter(r => {
+    const rd = parseRD(r.readingDate);
+    return rd && !isNaN(rd) && rd > cycleStart6th;
+  });
+
+  const finalRows = activeRows.length > 0 ? activeRows : (cycleRows.length > 0 ? [cycleRows[cycleRows.length - 1]] : []);
+  const cycleUnits = finalRows.reduce((s, r) => s + r.units, 0);
 
   const cycleStartDisplay = `6 ${cycleMonthDate.toLocaleString('default',{month:'long'})} ${cycleYear}`;
 
-  // Debug output
-  // Show ALL month values from sheet so we can see exact format
-  showDebug('ALL KE months: ' + sorted.map(r => '[' + r.month + ']').join(', '));
-  showDebug('Matching against: [' + cycleMonthName + '] year=' + cycleYear);
-  showDebug('Cycle rows found: ' + cycleRows.length + ' — units: ' + Math.round(cycleUnits));
-  cycleRows.forEach(r => showDebug('  matched: ' + r.month + ' units=' + Math.round(r.units)));
+  showDebug('Cycle start 6th: ' + cycleStart6th.toDateString());
+  showDebug('Month rows: ' + cycleRows.length + ' | After-6th rows: ' + activeRows.length + ' | Units: ' + Math.round(cycleUnits));
+  finalRows.forEach(r => showDebug('  counting: ' + r.readingDate + ' = ' + Math.round(r.units) + ' units'));
 
   const remaining = Math.max(0, 200 - cycleUnits);
   const pct       = Math.min(100, Math.round(cycleUnits / 200 * 100));
