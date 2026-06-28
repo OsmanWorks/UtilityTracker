@@ -804,8 +804,11 @@ function renderKE() {
   const cycleStartDisplay = `6 ${cycleMonthDate.toLocaleString('default',{month:'long'})} ${cycleYear}`;
 
   // Debug output
-  showDebug('Cycle month: ' + cycleMonthName + ' ' + cycleYear);
-  showDebug('Cycle rows found: ' + cycleRows.length + ' — units: ' + cycleUnits);
+  // Show ALL month values from sheet so we can see exact format
+  showDebug('ALL KE months: ' + sorted.map(r => '[' + r.month + ']').join(', '));
+  showDebug('Matching against: [' + cycleMonthName + '] year=' + cycleYear);
+  showDebug('Cycle rows found: ' + cycleRows.length + ' — units: ' + Math.round(cycleUnits));
+  cycleRows.forEach(r => showDebug('  matched: ' + r.month + ' units=' + Math.round(r.units)));
 
   const remaining = Math.max(0, 200 - cycleUnits);
   const pct       = Math.min(100, Math.round(cycleUnits / 200 * 100));
